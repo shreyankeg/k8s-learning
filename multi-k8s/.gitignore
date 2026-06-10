@@ -1,0 +1,17 @@
+# Terraform state & lock
+.terraform/
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+crash.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Credentials — never commit
+terraform.tfvars
+*.auto.tfvars
+
+# Generated SSH private keys
+keys/*.pem

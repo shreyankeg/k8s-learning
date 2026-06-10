@@ -1,0 +1,44 @@
+---
+- name: Load required kernel modules
+  community.general.modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - br_netfilter
+    - overlay
+
+- name: Persist kernel modules across reboots
+  copy:
+    dest: /etc/modules-load.d/rke2.conf
+    content: |
+      br_netfilter
+      overlay
+    mode: "0644"
+
+- name: Set sysctl parameters for Kubernetes networking
+  ansible.posix.sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: true
+  loop:
+    - { key: net.bridge.bridge-nf-call-iptables,  value: "1" }
+    - { key: net.bridge.bridge-nf-call-ip6tables, value: "1" }
+    - { key: net.ipv4.ip_forward,                 value: "1" }
+
+- name: Disable swap (Amazon Linux 2023 has none by default, idempotent)
+  command: swapoff -a
+  changed_when: false
+
+- name: Comment out any swap entries in /etc/fstab
+  replace:
+    path: /etc/fstab
+    regexp: '^([^#].*\s+swap\s+.*)$'
+    replace: '# \1'
+
+- name: Stop and disable firewalld if present
+  systemd:
+    name: firewalld
+    state: stopped
+    enabled: false
+  ignore_errors: true

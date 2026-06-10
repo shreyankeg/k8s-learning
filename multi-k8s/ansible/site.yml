@@ -1,0 +1,27 @@
+---
+# Run with: ansible-playbook site.yml
+# Result  : 3 independent RKE2 clusters
+#           cluster-1 → master-1 + slave-1  (AZ-a)
+#           cluster-2 → master-2 + slave-2  (AZ-b)
+#           cluster-3 → master-3 + slave-3  (AZ-c)
+
+- name: Common prerequisites on all nodes
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - rke2_common
+
+- name: Install RKE2 server on masters
+  hosts: masters
+  become: true
+  gather_facts: false
+  roles:
+    - rke2_server
+
+- name: Install RKE2 agent on slaves
+  hosts: slaves
+  become: true
+  gather_facts: false
+  roles:
+    - rke2_agent
