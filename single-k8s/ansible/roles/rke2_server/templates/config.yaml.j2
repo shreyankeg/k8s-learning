@@ -1,0 +1,7 @@
+node-name: {{ inventory_hostname }}
+tls-san:
+  - {{ ansible_host }}
+{% if master_host is defined %}
+server: https://{{ hostvars[master_host]['ansible_default_ipv4']['address'] }}:9345
+token: {{ rke2_node_token }}
+{% endif %}

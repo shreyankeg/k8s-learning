@@ -1,0 +1,27 @@
+---
+# Run with: ansible-playbook site.yml
+# Result  : 1 RKE2 HA cluster
+#           master-1 (init control plane) + master-2 (joining control plane) + agent-1..4 (workers)
+# serial: 1 on masters ensures master-1 is fully up before master-2 joins.
+
+- name: Common prerequisites on all nodes
+  hosts: all
+  become: true
+  gather_facts: true
+  roles:
+    - rke2_common
+
+- name: Install RKE2 server on masters
+  hosts: masters
+  become: true
+  gather_facts: false
+  serial: 1
+  roles:
+    - rke2_server
+
+- name: Install RKE2 agent on workers
+  hosts: slaves
+  become: true
+  gather_facts: false
+  roles:
+    - rke2_agent

@@ -1,0 +1,87 @@
+---
+- name: Read join token from init master (joining servers only)
+  slurp:
+    src: /var/lib/rancher/rke2/server/node-token
+  delegate_to: "{{ master_host }}"
+  register: _rke2_token
+  when: master_host is defined
+
+- name: Set join token fact
+  set_fact:
+    rke2_node_token: "{{ _rke2_token.content | b64decode | trim }}"
+  when: master_host is defined
+
+- name: Create RKE2 config directory
+  file:
+    path: /etc/rancher/rke2
+    state: directory
+    mode: "0755"
+
+- name: Write RKE2 server config
+  template:
+    src: config.yaml.j2
+    dest: /etc/rancher/rke2/config.yaml
+    mode: "0644"
+  register: _server_config
+
+- name: Download RKE2 install script
+  get_url:
+    url: https://get.rke2.io
+    dest: /tmp/install-rke2.sh
+    mode: "0755"
+    timeout: 60
+
+- name: Install RKE2 server binaries
+  command: /tmp/install-rke2.sh
+  environment:
+    INSTALL_RKE2_TYPE: server
+    INSTALL_RKE2_VERSION: "{{ rke2_version | default('') }}"
+  args:
+    creates: /usr/local/bin/rke2
+
+- name: Enable and start rke2-server service
+  systemd:
+    name: rke2-server
+    enabled: true
+    state: started
+    daemon_reload: true
+
+- name: Remove serving cert so RKE2 regenerates it with updated tls-san
+  file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /var/lib/rancher/rke2/server/tls/serving-kube-apiserver.crt
+    - /var/lib/rancher/rke2/server/tls/serving-kube-apiserver.key
+  when: _server_config.changed
+  notify: Restart rke2-server
+
+- name: Flush handlers before waiting for service
+  meta: flush_handlers
+
+- name: Wait for node-token to be generated (can take ~60 s on first boot)
+  wait_for:
+    path: /var/lib/rancher/rke2/server/node-token
+    timeout: 300
+
+- name: Wait for kubeconfig to be written
+  wait_for:
+    path: /etc/rancher/rke2/rke2.yaml
+    timeout: 300
+
+- name: Read node token
+  slurp:
+    src: /var/lib/rancher/rke2/server/node-token
+  register: _rke2_token
+
+- name: Expose token as host fact for agent play
+  set_fact:
+    rke2_node_token: "{{ _rke2_token.content | b64decode | trim }}"
+
+- name: Add RKE2 binaries and KUBECONFIG to system PATH
+  copy:
+    dest: /etc/profile.d/rke2.sh
+    content: |
+      export PATH=$PATH:/var/lib/rancher/rke2/bin
+      export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+    mode: "0644"

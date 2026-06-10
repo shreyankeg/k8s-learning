@@ -1,0 +1,50 @@
+---
+# Deploy ingress-nginx and cert-manager via RKE2's built-in HelmChart CRD.
+#
+# RKE2 watches /var/lib/rancher/rke2/server/manifests/ on every server node.
+# Dropping a HelmChart YAML there is enough — the built-in helm-controller
+# installs or reconciles the chart automatically. No Helm CLI required.
+#
+# Run from the target cluster's ansible directory so its inventory is used:
+#
+#   cd single-k8s/ansible && ansible-playbook ../../common/ansible/deploy-helm-charts.yml
+#   cd multi-k8s/ansible  && ansible-playbook ../../common/ansible/deploy-helm-charts.yml
+#
+# To upgrade or downgrade a chart: edit the `version` field in
+# common/helm-charts/<chart>.yaml and re-run this playbook.
+
+- name: Deploy Helm charts via RKE2 HelmChart CRD
+  hosts: masters
+  become: true
+  gather_facts: false
+
+  vars:
+    helm_charts_dir: "{{ playbook_dir }}/../helm-charts"
+    rke2_manifests_dir: /var/lib/rancher/rke2/server/manifests
+
+  tasks:
+    - name: Ensure RKE2 manifests directory exists
+      file:
+        path: "{{ rke2_manifests_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: Copy cert-manager HelmChart manifest
+      copy:
+        src: "{{ helm_charts_dir }}/cert-manager.yaml"
+        dest: "{{ rke2_manifests_dir }}/cert-manager.yaml"
+        mode: "0644"
+      register: _cert_manager
+
+    - name: Copy ingress-nginx HelmChart manifest
+      copy:
+        src: "{{ helm_charts_dir }}/ingress-nginx.yaml"
+        dest: "{{ rke2_manifests_dir }}/ingress-nginx.yaml"
+        mode: "0644"
+      register: _ingress_nginx
+
+    - name: Show reconciliation status
+      debug:
+        msg: >-
+          cert-manager: {{ 'updated' if _cert_manager.changed else 'already up to date' }} |
+          ingress-nginx: {{ 'updated' if _ingress_nginx.changed else 'already up to date' }}
