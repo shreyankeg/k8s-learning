@@ -1,3 +1,7 @@
 node-name: {{ inventory_hostname }}
 tls-san:
   - {{ ansible_host }}
+# Bundled ingress disabled — the ingress controller (nginx or traefik) is
+# installed via common/ansible/deploy-helm-charts-*.yml instead.
+disable:
+  - rke2-ingress-nginx

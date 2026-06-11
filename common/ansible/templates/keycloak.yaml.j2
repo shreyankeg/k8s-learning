@@ -1,0 +1,67 @@
+---
+# Keycloak — identity and access management (codecentric keycloakx chart,
+# official quay.io/keycloak/keycloak image).
+#
+# Chart 7.2.0 ships Keycloak 26.x. To upgrade: bump `version` and re-run
+# deploy-keycloak.yml.
+#
+# Runs in production mode (`start`). Requires an external PostgreSQL database
+# — supply db_host, db_name, db_username, db_password via the playbook.
+#
+# Rendered by deploy-keycloak.yml — do not edit on the node.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: keycloak
+  namespace: kube-system
+spec:
+  repo: https://codecentric.github.io/helm-charts
+  chart: keycloakx
+  version: "7.2.0"
+  targetNamespace: keycloak
+  createNamespace: true
+  valuesContent: |-
+    replicas: {{ keycloak_replicas | default(2) }}
+    command:
+      - "/opt/keycloak/bin/kc.sh"
+      - "start"
+      - "--proxy-headers=xforwarded"
+      - "--hostname={{ keycloak_host }}"
+      - "--hostname-strict=true"
+      - "--optimized"
+    extraEnv: |
+      - name: KC_BOOTSTRAP_ADMIN_USERNAME
+        value: "{{ keycloak_admin_user | default('admin') }}"
+      - name: KC_BOOTSTRAP_ADMIN_PASSWORD
+        value: "{{ keycloak_admin_password }}"
+      - name: KC_DB
+        value: "postgres"
+      - name: KC_DB_URL
+        value: "jdbc:postgresql://{{ db_host }}:{{ db_port | default(5432) }}/{{ db_name }}"
+      - name: KC_DB_USERNAME
+        value: "{{ db_username }}"
+      - name: KC_DB_PASSWORD
+        value: "{{ db_password }}"
+      - name: JAVA_OPTS_APPEND
+        value: "-Djgroups.dns.query=keycloak-headless.keycloak.svc.cluster.local"
+    http:
+      relativePath: "/"
+    ingress:
+      enabled: true
+      ingressClassName: "{{ ingress_class | default('traefik') }}"
+{% if letsencrypt_email is defined %}
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+{% endif %}
+      rules:
+        - host: "{{ keycloak_host }}"
+          paths:
+            - path: /
+              pathType: Prefix
+{% if letsencrypt_email is defined %}
+      tls:
+        - hosts:
+            - "{{ keycloak_host }}"
+          secretName: keycloak-tls
+{% endif %}

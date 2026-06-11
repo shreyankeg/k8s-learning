@@ -1,0 +1,37 @@
+---
+# external-dns — auto-creates Route 53 records for Ingress hosts.
+#
+# Watches Ingress resources and upserts an A/ALIAS record (e.g.
+# keycloak.{{ base_domain }}) pointing at the LB of the installed ingress
+# controller (traefik or nginx). AWS access comes from the node IAM role
+# created by Terraform (route53:ChangeResourceRecordSets etc.).
+#
+# Rendered by deploy-keycloak.yml — do not edit on the node.
+
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: external-dns
+  namespace: kube-system
+spec:
+  repo: https://kubernetes-sigs.github.io/external-dns/
+  chart: external-dns
+  version: "1.21.1"
+  targetNamespace: external-dns
+  createNamespace: true
+  valuesContent: |-
+    provider:
+      name: aws
+    sources:
+      - ingress
+    # upsert-only: never deletes records it didn't create; switch to "sync"
+    # if you want records removed when the Ingress is deleted.
+    policy: upsert-only
+    registry: txt
+    # Ownership marker so multiple clusters can share one hosted zone
+    txtOwnerId: "{{ external_dns_txt_owner | default(inventory_hostname) }}"
+    domainFilters:
+      - "{{ base_domain }}"
+    env:
+      - name: AWS_DEFAULT_REGION
+        value: "{{ aws_region | default('us-east-1') }}"

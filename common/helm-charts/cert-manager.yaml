@@ -1,7 +1,8 @@
 ---
 # cert-manager — TLS certificate management (Let's Encrypt, self-signed, etc.)
 #
-# To upgrade/downgrade: change `version` and re-run deploy-helm-charts.yml.
+# To upgrade/downgrade: change `version` and re-run deploy-helm-charts-nginx.yml
+# or deploy-helm-charts-traefik.yml (whichever your cluster uses).
 # RKE2's helm-controller will reconcile the change automatically.
 #
 # Docs: https://cert-manager.io/docs/installation/helm/

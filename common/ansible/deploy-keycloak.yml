@@ -1,0 +1,114 @@
+---
+# Deploy Keycloak (production mode) + external-dns via RKE2's HelmChart CRD.
+#
+# external-dns automatically creates a Route 53 record for the Keycloak
+# Ingress host (e.g. keycloak.example.com) pointing at the LoadBalancer of
+# whichever ingress controller is installed (traefik or nginx). The nodes
+# need the Route 53 IAM role created by Terraform (modules/ec2).
+#
+# Prerequisites:
+#   - cert-manager + an ingress controller already deployed
+#     (deploy-helm-charts-traefik.yml or deploy-helm-charts-nginx.yml)
+#   - A Route 53 public hosted zone for base_domain in the same AWS account
+#   - A reachable PostgreSQL database (RDS recommended)
+#
+# Required variables (pass with -e or set in inventory group_vars):
+#   base_domain              e.g. endpoint.com
+#   keycloak_admin_password  initial admin password
+#   db_host                  PostgreSQL hostname or IP
+#   db_name                  database name
+#   db_username              database user
+#   db_password              database password
+#
+# Optional variables:
+#   keycloak_host            default: keycloak.<base_domain>
+#   keycloak_admin_user      default: admin
+#   keycloak_replicas        default: 2
+#   db_port                  default: 5432
+#   ingress_class            traefik (default) or nginx — must match the
+#                            controller deployed on the cluster
+#   letsencrypt_email        if set, creates a letsencrypt-prod ClusterIssuer
+#                            and enables TLS on the Keycloak Ingress
+#   aws_region               default: us-east-1 (match your Terraform region)
+#   external_dns_txt_owner   default: inventory_hostname — keep unique per
+#                            cluster when several clusters share one zone
+#
+# Example:
+#
+#   cd single-k8s/ansible
+#   ansible-playbook ../../common/ansible/deploy-keycloak.yml \
+#     -e base_domain=endpoint.com \
+#     -e keycloak_admin_password='KcAdmin!' \
+#     -e db_host=my-postgres.rds.amazonaws.com \
+#     -e db_name=keycloak \
+#     -e db_username=keycloak \
+#     -e db_password='DbPass!' \
+#     -e letsencrypt_email=you@example.com
+#
+#   # nginx instead of traefik
+#   ... -e ingress_class=nginx
+#
+# multi-k8s note: run with --limit master-1 (or cluster1_master) — deploying
+# to all 3 clusters would have them fight over the same keycloak.<domain>
+# record unless you also set a distinct keycloak_host per cluster.
+
+- name: Deploy Keycloak and external-dns via RKE2 HelmChart CRD
+  hosts: masters
+  become: true
+  gather_facts: false
+
+  vars:
+    rke2_manifests_dir: /var/lib/rancher/rke2/server/manifests
+    keycloak_host: "keycloak.{{ base_domain | default('') }}"
+
+  tasks:
+    - name: Validate required variables
+      assert:
+        that:
+          - base_domain is defined and base_domain | length > 0
+          - keycloak_admin_password is defined and keycloak_admin_password | length > 0
+          - db_host is defined and db_host | length > 0
+          - db_name is defined and db_name | length > 0
+          - db_username is defined and db_username | length > 0
+          - db_password is defined and db_password | length > 0
+        fail_msg: >-
+          Required: base_domain, keycloak_admin_password, db_host, db_name,
+          db_username, db_password.
+          Example: -e base_domain=endpoint.com -e keycloak_admin_password='KcAdmin!'
+                   -e db_host=my-pg.rds.amazonaws.com -e db_name=keycloak
+                   -e db_username=keycloak -e db_password='DbPass!'
+
+    - name: Ensure RKE2 manifests directory exists
+      file:
+        path: "{{ rke2_manifests_dir }}"
+        state: directory
+        mode: "0750"
+
+    - name: Render external-dns HelmChart manifest
+      template:
+        src: external-dns.yaml.j2
+        dest: "{{ rke2_manifests_dir }}/external-dns.yaml"
+        mode: "0644"
+      register: _external_dns
+
+    - name: Render keycloak HelmChart manifest
+      template:
+        src: keycloak.yaml.j2
+        dest: "{{ rke2_manifests_dir }}/keycloak.yaml"
+        mode: "0600"
+      register: _keycloak
+
+    - name: Render Let's Encrypt ClusterIssuer
+      template:
+        src: letsencrypt-issuer.yaml.j2
+        dest: "{{ rke2_manifests_dir }}/letsencrypt-issuer.yaml"
+        mode: "0644"
+      register: _issuer
+      when: letsencrypt_email is defined
+
+    - name: Show reconciliation status
+      debug:
+        msg: >-
+          external-dns: {{ 'updated' if _external_dns.changed else 'already up to date' }} |
+          keycloak: {{ 'updated' if _keycloak.changed else 'already up to date' }} |
+          url: http{{ 's' if letsencrypt_email is defined else '' }}://{{ keycloak_host }}

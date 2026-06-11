@@ -48,6 +48,54 @@ resource "aws_security_group" "this" {
   tags = merge({ Name = "${var.instance_name_prefix}-sg" }, var.tags)
 }
 
+# IAM role attached to every node so in-cluster workloads (external-dns)
+# can manage Route 53 records via the instance profile — no static AWS keys.
+resource "aws_iam_role" "node" {
+  name = "${var.instance_name_prefix}-node-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "ec2.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+
+  tags = var.tags
+}
+
+resource "aws_iam_role_policy" "route53_dns" {
+  name = "${var.instance_name_prefix}-route53-dns"
+  role = aws_iam_role.node.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = ["route53:ChangeResourceRecordSets"]
+        Resource = ["arn:aws:route53:::hostedzone/*"]
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "route53:ListHostedZones",
+          "route53:ListResourceRecordSets",
+          "route53:ListTagsForResource"
+        ]
+        Resource = ["*"]
+      }
+    ]
+  })
+}
+
+resource "aws_iam_instance_profile" "node" {
+  name = "${var.instance_name_prefix}-node-profile"
+  role = aws_iam_role.node.name
+  tags = var.tags
+}
+
 resource "aws_instance" "this" {
   count = local.total
 
@@ -57,6 +105,15 @@ resource "aws_instance" "this" {
   subnet_id                   = element(var.subnet_ids, count.index)
   vpc_security_group_ids      = [aws_security_group.this.id]
   associate_public_ip_address = true
+  iam_instance_profile        = aws_iam_instance_profile.node.name
+
+  # Hop limit 2 lets pods (behind the CNI overlay) reach the instance
+  # metadata service to pick up the node role's credentials.
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required"
+    http_put_response_hop_limit = 2
+  }
 
   tags = merge(
     { Name = local.instance_names[count.index] },

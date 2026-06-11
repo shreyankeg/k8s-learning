@@ -1,5 +1,5 @@
 ---
-# Deploy ingress-nginx and cert-manager via RKE2's built-in HelmChart CRD.
+# Deploy cert-manager and traefik via RKE2's built-in HelmChart CRD.
 #
 # RKE2 watches /var/lib/rancher/rke2/server/manifests/ on every server node.
 # Dropping a HelmChart YAML there is enough — the built-in helm-controller
@@ -7,13 +7,18 @@
 #
 # Run from the target cluster's ansible directory so its inventory is used:
 #
-#   cd single-k8s/ansible && ansible-playbook ../../common/ansible/deploy-helm-charts.yml
-#   cd multi-k8s/ansible  && ansible-playbook ../../common/ansible/deploy-helm-charts.yml
+#   cd single-k8s/ansible && ansible-playbook ../../common/ansible/deploy-helm-charts-traefik.yml
+#   cd multi-k8s/ansible  && ansible-playbook ../../common/ansible/deploy-helm-charts-traefik.yml
 #
 # To upgrade or downgrade a chart: edit the `version` field in
 # common/helm-charts/<chart>.yaml and re-run this playbook.
+#
+# Switching from ingress-nginx? Removing its manifest file does NOT uninstall
+# the chart — run once per cluster first:
+#
+#   kubectl delete helmchart -n kube-system ingress-nginx
 
-- name: Deploy Helm charts via RKE2 HelmChart CRD
+- name: Deploy cert-manager and traefik via RKE2 HelmChart CRD
   hosts: masters
   become: true
   gather_facts: false
@@ -36,15 +41,20 @@
         mode: "0644"
       register: _cert_manager
 
-    - name: Copy ingress-nginx HelmChart manifest
+    - name: Copy traefik HelmChart manifest
       copy:
-        src: "{{ helm_charts_dir }}/ingress-nginx.yaml"
-        dest: "{{ rke2_manifests_dir }}/ingress-nginx.yaml"
+        src: "{{ helm_charts_dir }}/traefik.yaml"
+        dest: "{{ rke2_manifests_dir }}/traefik.yaml"
         mode: "0644"
-      register: _ingress_nginx
+      register: _traefik
+
+    - name: Remove ingress-nginx manifest (only one ingress controller at a time)
+      file:
+        path: "{{ rke2_manifests_dir }}/ingress-nginx.yaml"
+        state: absent
 
     - name: Show reconciliation status
       debug:
         msg: >-
           cert-manager: {{ 'updated' if _cert_manager.changed else 'already up to date' }} |
-          ingress-nginx: {{ 'updated' if _ingress_nginx.changed else 'already up to date' }}
+          traefik: {{ 'updated' if _traefik.changed else 'already up to date' }}
